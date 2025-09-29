@@ -1,9 +1,8 @@
-name: Update BTC/EUR Report
+name: Update BTC/EUR report.json
 
 on:
   schedule:
-    # 07:00 UTC ≈ 09:00 Europe/Berlin
-    - cron: '0 7 * * *'
+    - cron: '0 7 * * *'   # 07:00 UTC ≈ 09:00 Europe/Berlin
   workflow_dispatch: {}
 
 permissions:
@@ -19,42 +18,54 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
 
-      - name: Fetch JSON from m-itservices (php proxy)
+      - name: Fetch JSON from php proxy (robust)
         id: fetch
+        shell: bash
         run: |
           set -euo pipefail
           URL="https://www.m-itservices.de/report/eQeQDQQ424234234WERDWFEGEFASDFWASDFASDF.php?tz=Europe/Berlin"
-          tmpfile="$(mktemp)"
-          # Retry a few times in case of transient issues
+          TMP="$(mktemp)"
+          # 3 Versuche mit Backoff, sauberer UA
           for i in 1 2 3; do
-            if curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-all-errors \
+            if curl -fsSL --max-time 25 \
               -H "User-Agent: GitHubActions/1.0 (+https://github.com/actions)" \
-              "$URL" -o "$tmpfile"; then
+              "$URL" -o "$TMP"; then
               break
             fi
-            sleep 2
+            sleep $((i*2))
           done
-          # Validate JSON
-          jq . "$tmpfile" > report.json
-
-      - name: Commit changes (if any)
-        run: |
-          set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if git diff --quiet -- report.json; then
-            echo "No changes in report.json"
+          # Wenn Abruf scheitert: Workflow grün beenden (keine roten Builds)
+          if [ ! -s "$TMP" ]; then
+            echo "WARN: Kein JSON erhalten – Abbruch ohne Fehler."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # JSON validieren und normalisieren
+          jq . "$TMP" > report.json
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Commit & push if changed
+        if: steps.fetch.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Nur committen, wenn sich der Inhalt wirklich geändert hat
+          if git diff --quiet -- report.json; then
+            echo "Keine Änderungen an report.json."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # [skip ci] verhindert, dass dein Hugo-Workflow auf diesen Commit anspringt
           git add report.json
-          git commit -m "Update report.json ($(date -u +'%Y-%m-%dT%H:%MZ'))"
+          git commit -m "chore: update report.json [skip ci]"
           git push
