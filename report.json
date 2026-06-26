@@ -1,13 +1,8 @@
 {
-  "fetched_at": "2026-06-25T12:17:37+02:00",
+  "fetched_at": "2026-06-26T12:25:28+02:00",
   "timezone": "Europe/Berlin",
   "rate": {
     "rate_weighted": "54525.00000000"
   },
-  "vwaps": {
-    "2026-06-18": {
-      "vwap": 62499,
-      "volume": 0.05
-    }
-  }
+  "vwaps": []
 }
